@@ -1,0 +1,119 @@
+#!/bin/bash
+# speak — Lit le texte sélectionné avec ElevenLabs TTS
+# Usage: speak --voice adam|jerome|laurent "texte optionnel"
+#        speak "texte"  (voix par défaut: laurent)
+#        speak          (lit le clipboard, voix par défaut)
+#
+# Pré-requis :
+#   - ~/.config/elevenlabs/config avec ELEVENLABS_API_KEY=sk_xxx
+#   - curl + afplay (natifs macOS)
+
+set -euo pipefail
+
+CONFIG_FILE="$HOME/.config/elevenlabs/config"
+MODEL_ID="eleven_multilingual_v2"
+CACHE_DIR="/tmp/elevenlabs-tts-cache"
+
+# --- Voix disponibles ---
+VOICE_ADAM="YOUR_VOICE_1_ID"       # Adam — Landry (africain)
+VOICE_JEROME="YOUR_VOICE_2_ID"     # Jérôme — Premium Male teacher (québécois/canadien)
+VOICE_LAURENT="YOUR_VOICE_3_ID"    # Mr. Laurent — warm & reassuring (parisien)
+
+# --- Voix par défaut ---
+VOICE_ID="$VOICE_LAURENT"
+VOICE_NAME="Laurent"
+RAW_MODE=false
+
+# --- Parser --voice et --raw ---
+while true; do
+    case "${1:-}" in
+        --voice)
+            VOICE_ARG=$(echo "${2:-}" | tr '[:upper:]' '[:lower:]')
+            case "$VOICE_ARG" in
+                adam)    VOICE_ID="$VOICE_ADAM";    VOICE_NAME="Adam" ;;
+                jerome)  VOICE_ID="$VOICE_JEROME";  VOICE_NAME="Jerome" ;;
+                laurent) VOICE_ID="$VOICE_LAURENT"; VOICE_NAME="Laurent" ;;
+                *) echo "Voix inconnue: ${2:-} (adam|jerome|laurent)"; exit 1 ;;
+            esac
+            shift 2
+            ;;
+        --raw)
+            RAW_MODE=true
+            shift
+            ;;
+        *) break ;;
+    esac
+done
+
+notify() {
+    osascript -e "display notification \"$1\" with title \"Speak ($VOICE_NAME)\"" 2>/dev/null || true
+}
+
+# --- Charger la clé API ---
+if [ ! -f "$CONFIG_FILE" ]; then
+    notify "Fichier config manquant"
+    exit 1
+fi
+source "$CONFIG_FILE"
+
+# --- Récupérer le texte : argument CLI, stdin (pipe), ou clipboard ---
+if [ -n "${1:-}" ]; then
+    TEXT="$*"
+elif [ ! -t 0 ]; then
+    TEXT=$(cat)
+else
+    TEXT=$(pbpaste 2>/dev/null || true)
+fi
+
+# --- Vérifications ---
+if [ -z "$TEXT" ]; then
+    notify "Aucun texte - copie d abord avec CMD+C"
+    exit 1
+fi
+
+if [ -z "${ELEVENLABS_API_KEY:-}" ]; then
+    notify "API key manquante dans config"
+    exit 1
+fi
+
+# --- Cache par hash du texte + voix (évite de re-générer le même texte) ---
+mkdir -p "$CACHE_DIR"
+HASH=$(echo -n "${VOICE_ID}:${TEXT}" | md5)
+CACHE_FILE="$CACHE_DIR/$HASH.mp3"
+
+if [ -f "$CACHE_FILE" ]; then
+    afplay "$CACHE_FILE" &
+    exit 0
+fi
+
+# --- Notification "en cours" ---
+notify "Generation audio en cours..." &
+
+# --- Nettoyage TTS (sauf si --raw : texte déjà nettoyé en amont) ---
+TTS_CLEAN="$HOME/.local/bin/tts-clean"
+if [ "$RAW_MODE" = false ] && [ -x "$TTS_CLEAN" ]; then
+    TEXT=$(echo "$TEXT" | "$TTS_CLEAN")
+fi
+
+# --- Préparer le JSON (échapper les guillemets et limiter à 5000 chars) ---
+ESCAPED_TEXT=$(echo "$TEXT" | head -c 5000 | python3 -c "import sys,json; print(json.dumps(sys.stdin.read(), ensure_ascii=False)[1:-1])")
+
+# --- Appel API ElevenLabs ---
+HTTP_CODE=$(curl -s -w "%{http_code}" \
+  -X POST \
+  -H "xi-api-key: $ELEVENLABS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"text\":\"$ESCAPED_TEXT\",\"model_id\":\"$MODEL_ID\"}" \
+  "https://api.elevenlabs.io/v1/text-to-speech/$VOICE_ID" \
+  -o "$CACHE_FILE")
+
+# --- Vérifier la réponse ---
+if [ "$HTTP_CODE" != "200" ]; then
+    ERROR_MSG=$(cat "$CACHE_FILE" 2>/dev/null | head -c 200)
+    rm -f "$CACHE_FILE"
+    notify "Erreur API ($HTTP_CODE)"
+    exit 1
+fi
+
+# --- Jouer l'audio ---
+afplay "$CACHE_FILE" &

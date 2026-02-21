@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""
+tts-clean — Nettoie un texte pour le rendre lisible par un moteur TTS.
+Usage:
+  echo "texte avec ~100ms et des — tirets" | tts-clean
+  tts-clean "texte direct en argument"
+"""
+
+import re
+import sys
+
+
+def clean_for_tts(text: str) -> str:
+    # ── Blocs de code (en premier) ───────────────────────
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+
+    # ── Unités techniques (AVANT le nettoyage des ~) ─────
+    text = re.sub(r'~(\d+)\s*ms\b', r'environ \1 millisecondes', text)
+    text = re.sub(r'~(\d+)\s*s\b', r'environ \1 secondes', text)
+    text = re.sub(r'~(\d+)\s*min\b', r'environ \1 minutes', text)
+    text = re.sub(r'~(\d+)\s*FPS\b', r'environ \1 images par seconde', text)
+    text = re.sub(r'(\d+)\s*chars?/sec\b', r'\1 caractères par seconde', text)
+    text = re.sub(r'(\d+)\s*req/min\b', r'\1 requêtes par minute', text)
+    text = re.sub(r'(\d+)\s*FPS\b', r'\1 images par seconde', text)
+    text = re.sub(r'(\d+)\s*KB\b', r'\1 kilo-octets', text)
+    text = re.sub(r'(\d+)\s*MB\b', r'\1 méga-octets', text)
+    text = re.sub(r'(\d+)\s*GB\b', r'\1 giga-octets', text)
+    text = re.sub(r'(\d+)\s*ms\b', r'\1 millisecondes', text)
+
+    # ── Tilde restant → environ (éviter les doublons) ────
+    text = re.sub(r'environ\s*~', 'environ ', text)
+    text = re.sub(r'~(\d)', r'environ \1', text)
+    text = re.sub(r'~', '', text)
+
+    # ── Dédoublonnage "environ environ" ────────────────
+    text = re.sub(r'\benviron\s+environ\b', 'environ', text)
+
+    # ── URLs et chemins (APRÈS les unités) ───────────────
+    text = re.sub(r'https?://\S+', '', text)
+    text = re.sub(r'(?<!\w)/[\w./_-]{3,}', '', text)
+    # Chemins type packages/foo/bar.ts ou src/lib/index.js
+    text = re.sub(r'\b[\w-]+(?:/[\w.-]+){2,}', '', text)
+
+    # ── Symboles et ponctuation ──────────────────────────
+    text = re.sub(r'—', ', ', text)
+    text = re.sub(r'–', ', ', text)
+    text = re.sub(r'\.{3,}', '.', text)
+    text = re.sub(r'[→←↑↓]', ', ', text)
+    text = re.sub(r'[•·]', ',', text)
+    text = re.sub(r'[{}\[\]]', '', text)
+    text = re.sub(r'[<>]', '', text)
+    text = re.sub(r'[#*_]{2,}', '', text)
+    text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*[-*]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\|', ',', text)
+
+    # ── Abréviations ─────────────────────────────────────
+    text = re.sub(r'\bex\.\s*:', 'par exemple :', text)
+    text = re.sub(r'\bi\.e\.\s*', "c'est-à-dire ", text)
+    text = re.sub(r'\be\.g\.\s*', 'par exemple ', text)
+    text = re.sub(r'\betc\.\s*', 'et cetera. ', text)
+    text = re.sub(r'\bvs\.?\s', ' contre ', text)
+
+    # ── Sigles (épeler) ──────────────────────────────────
+    text = re.sub(r'\bAPI\b', 'A P I', text)
+    text = re.sub(r'\bSSE\b', 'S S E', text)
+    text = re.sub(r'\bTTS\b', 'T T S', text)
+    text = re.sub(r'\bUI\b', 'U I', text)
+    text = re.sub(r'\bCI/CD\b', 'C I C D', text)
+    text = re.sub(r'\bRAG\b', 'R A G', text)
+    text = re.sub(r'\bLLM\b', 'L L M', text)
+    text = re.sub(r'\bSaaS\b', 'Sass', text)
+    text = re.sub(r'\bDB\b', 'base de données', text)
+
+    # ── Nettoyage final ──────────────────────────────────
+    text = re.sub(r'\(\s*\)', '', text)       # parenthèses vides
+    text = re.sub(r',\s*,', ',', text)        # virgules doubles
+    text = re.sub(r'\s{2,}', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = text.strip()
+
+    return text
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        raw = ' '.join(sys.argv[1:])
+    else:
+        raw = sys.stdin.read()
+
+    print(clean_for_tts(raw))

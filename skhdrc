@@ -1,0 +1,6 @@
+# VoiceRecap — Global TTS hotkeys (work everywhere: VSCode, Chrome, Slack, etc.)
+# Cmd+Option+Y → Voice 1
+# Cmd+Option+X → Voice 2
+
+cmd + alt - y : $HOME/.local/bin/speak-voice1 &
+cmd + alt - x : $HOME/.local/bin/speak-voice2 &
